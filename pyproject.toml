@@ -1,0 +1,19 @@
+[project]
+name = "airband-monitor"
+version = "0.1.0"
+description = "Civil aviation VHF anomalous music intrusion monitor"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+airband-monitor = "airband_monitor.main:main"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,25 @@
+site:
+  id: site-gz-001
+
+storage:
+  sqlite_path: data/events.db
+  artifact_root: data/artifacts
+
+detection:
+  music_prob_threshold: 0.70
+  min_duration_sec: 5
+  duplicate_cooldown_sec: 120
+
+buffers:
+  iq_ring_sec: 120
+  pre_trigger_sec: 30
+  post_trigger_sec: 90
+
+retention:
+  enabled: true
+  start_cleanup_percent: 85
+  stop_cleanup_percent: 75
+
+alert:
+  wecom_webhook: ""
+  dry_run: true
