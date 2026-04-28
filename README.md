@@ -40,6 +40,89 @@ SDR (RTL-SDR in PoC; pluggable backend later)
   -> SQLite + file storage
 ```
 
+## Current Implementation Status
+
+This repository now includes a runnable v0.1 scaffold:
+
+- Config loader (`configs/default.yaml` + env override for `WECOM_WEBHOOK`)
+- Temporal music scoring with hold-time and cooldown
+- SQLite event persistence
+- Artifact recorder (`audio/iq/spectrum/meta`)
+- WeCom notifier (dry-run supported)
+- Multiple runtime sources: simulate / JSONL file / STDIN JSONL / WAV directory fallback / rtl_airband recordings
+- Event query mode: list recent events from SQLite
+
+## Quick Start
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e . --no-build-isolation
+
+# Dry-run simulated pipeline (no SDR required)
+python -m airband_monitor.main --simulate
+
+# Replay model output frames from file
+python -m airband_monitor.main --input-jsonl examples/frames.jsonl
+
+# Query recent events
+python -m airband_monitor.main --list-events 10
+
+# Evaluate threshold candidates from labeled samples
+python -m airband_monitor.main --evaluate-jsonl examples/eval_samples.jsonl --eval-thresholds 0.5,0.6,0.7,0.8
+
+# Classify existing WAV chunks (fallback heuristic)
+python -m airband_monitor.main --input-wav-dir /path/to/wav --wav-freq 121.5
+
+# Ingest rtl_airband recording directory (freq inferred from filename if possible)
+python -m airband_monitor.main --input-rtl-dir /path/to/rtl_recordings --rtl-default-freq 121.5
+
+# Watch mode for continuous ingest (new files only)
+python -m airband_monitor.main --input-rtl-dir /path/to/rtl_recordings --watch --poll-interval 2 --watch-state-file data/watch_seen_files.txt --classifier-backend auto
+```
+
+The pipeline persists events to `data/events.db` and artifacts to `data/artifacts/`.
+
+## Runtime Input Contract (JSONL)
+
+Each line should be one JSON object:
+
+```json
+{"ts_utc":"2026-04-27T14:30:00+00:00","freq_mhz":121.5,"music_prob":0.83,"labels":{"music":0.83},"audio_path":"/path/chunk.wav","iq_path":"/path/chunk.iq"}
+```
+
+This makes it easy to bridge external inference pipelines (rtl_airband + classifier sidecar) into this eventing core.
+
+
+
+## rtl_airband Recording Mode
+
+`--input-rtl-dir` scans WAV recordings (recursive) and tries to infer frequency from filename patterns:
+
+- decimal MHz: `121.500`
+- Hz integer: `121500000`
+
+If frequency cannot be inferred, it uses `--rtl-default-freq` when provided.
+
+Watch mode details:
+- `--watch` works with `--input-wav-dir` or `--input-rtl-dir`
+- only newly discovered WAV files are processed per poll
+- `--max-loops N` can be used for bounded runs in testing
+- seen file persistence avoids duplicate processing across restarts (`--watch-state-file`)
+- each loop prints summary logs: total files, new files, triggered events
+
+## WAV Directory Fallback Mode
+
+For early rtl_airband integration (before YAMNet sidecar wiring), you can point the pipeline to a WAV directory.
+Each `*.wav` file is heuristically scored and converted into ingestion frames automatically.
+
+This mode is for bring-up only; YAMNet should replace it for production detection quality.
+
+Classifier backend options:
+- `--classifier-backend auto` (default): use YAMNet if available, else fallback heuristic
+- `--classifier-backend yamnet`: force YAMNet (requires tensorflow/tensorflow_hub/scipy)
+- `--classifier-backend heuristic`: force lightweight fallback
+
 ## Detection Strategy (v0.1 defaults)
 
 1. Light pre-gate by energy/VAD.
@@ -86,3 +169,13 @@ Design preference: **prefer false positives over misses** in early stage.
 - v1.0: Multi-node deployment and event federation
 
 See implementation plan in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
+
+## v0.1 Merge Gate (Recommended)
+
+Before merge, run at least:
+
+1. `pytest -q`
+2. `python -m airband_monitor.main --simulate --classifier-backend heuristic`
+3. `python -m airband_monitor.main --evaluate-jsonl examples/eval_samples.jsonl --eval-thresholds 0.5,0.6,0.7,0.8,0.9`
+
+Use the evaluation report to pick an initial threshold for deployment.

@@ -134,3 +134,34 @@ retention:
 alert:
   wecom_webhook: "${WECOM_WEBHOOK}"
 ```
+
+## 10) Progress Update (implemented)
+
+- Added runnable event core with CLI modes:
+  - `--simulate`
+  - `--input-jsonl <file>`
+  - `--stdin-jsonl`
+- Added JSONL ingestion contract for classifier sidecar integration.
+- Added artifact recorder for per-event `audio.wav`, `capture.iq`, `spectrum.png`, `meta.json` (valid PNG placeholder).
+- Added baseline tests for ingestion and recorder modules.
+- Added SQLite query mode for recent event inspection (`--list-events`).
+- Added WAV directory fallback ingestion with heuristic audio classifier for rtl_airband bring-up.
+- Added rtl_airband recording directory ingest with filename-based frequency inference.
+- Added watch mode for incremental ingest of newly created WAV files.
+- Added persistent watch seen-file state to avoid duplicate processing after restart.
+- Added per-loop watch logging (total/new/triggered counters).
+- Added classifier backend selection (`auto`/`heuristic`/`yamnet`) with optional YAMNet runtime path.
+
+## 11) v0.1 Merge Checklist
+
+- [ ] Unit tests pass (`pytest -q`)
+- [ ] Simulated E2E run succeeds
+- [ ] Threshold grid evaluation report generated from labeled samples
+- [ ] README quick-start commands validated
+
+## 12) Remaining TODOs (to reach stable v0.1)
+
+- Replace heuristic-only default with validated YAMNet runtime in target environment
+- Implement true IQ ring-buffer capture (currently structural placeholders exist)
+- Add replay-based false-positive analysis over real captured samples
+- Add service packaging (systemd/docker) for long-running node deployment
