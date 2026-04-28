@@ -1,0 +1,26 @@
+site:
+  id: poc-macos-001
+
+storage:
+  sqlite_path: data/poc_events.db
+  artifact_root: data/poc_artifacts
+
+detection:
+  # Lower thresholds for PoC testing — easier to trigger
+  music_prob_threshold: 0.60
+  min_duration_sec: 2
+  duplicate_cooldown_sec: 10
+
+buffers:
+  iq_ring_sec: 60
+  pre_trigger_sec: 5
+  post_trigger_sec: 15
+
+retention:
+  enabled: false
+  start_cleanup_percent: 85
+  stop_cleanup_percent: 75
+
+alert:
+  wecom_webhook: ""
+  dry_run: true

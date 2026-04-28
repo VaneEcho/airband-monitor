@@ -35,6 +35,7 @@ class YAMNetClassifier:
             import tensorflow_hub as hub  # type: ignore
             import numpy as np  # type: ignore
             from scipy.io import wavfile  # type: ignore
+            from scipy.signal import resample as scipy_resample  # type: ignore
         except Exception as exc:  # pragma: no cover - env dependent
             raise RuntimeError(
                 "YAMNet backend unavailable. Install tensorflow tensorflow_hub scipy."
@@ -44,6 +45,7 @@ class YAMNetClassifier:
         self.hub = hub
         self.np = np
         self.wavfile = wavfile
+        self.scipy_resample = scipy_resample
         self.model = hub.load(self.config.model_url)
         self.class_names = self._load_class_names()
 
@@ -72,7 +74,7 @@ class YAMNetClassifier:
         # YAMNet expects 16k mono float32
         target_sr = 16000
         if sr != target_sr:
-            wav = self.tf.signal.resample(wav, int(len(wav) * target_sr / sr)).numpy()
+            wav = self.scipy_resample(wav, int(len(wav) * target_sr / sr)).astype(self.np.float32)
 
         scores, _, _ = self.model(wav)
         scores_np = scores.numpy()

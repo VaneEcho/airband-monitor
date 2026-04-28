@@ -1,0 +1,9 @@
+pyyaml>=6.0
+numpy>=1.24
+scipy>=1.10
+soundfile>=0.12
+
+# YAMNet backend — heavy but needed for accurate music/speech classification
+# On Apple Silicon: pip install tensorflow-macos tensorflow-metal first, then:
+tensorflow>=2.13
+tensorflow-hub>=0.15
