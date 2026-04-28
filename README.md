@@ -1,181 +1,190 @@
 # airband-monitor
 
-Detect anomalous music/broadcast intrusion on civil aviation VHF channels.
+民航 VHF 频段异常音频（音乐/广播）自动监听、检测与取证系统。
 
-## Problem
+## 背景
 
-In normal ATC VHF AM communications, sustained music or broadcast-like content is highly abnormal. This project builds a practical, low-cost monitoring pipeline to detect those events and preserve evidence automatically.
+民航 ATC 通话频率上出现音乐或广播声是严重的违规干扰现象。本项目构建一套低成本、可独立部署的监听管道，自动检测此类事件并留存完整证据链（IQ 原始数据、解调音频、频谱图、元数据）。
 
-## Scope (v0.1 PoC)
+## 系统架构
 
-- Fixed-frequency monitoring (no scanning in v0.1)
-- Single SDR device for initial validation (`RTL-SDR`)
-- AM demodulation via `rtl_airband`
-- Audio classification via `YAMNet`
-- WeCom webhook alerting
-- Evidence capture: audio + IQ + spectrum PNG + metadata JSON
-- Local metadata DB: SQLite
-- Retention: keep forever until disk watermark-based cleanup
-
-## Target Frequencies (v0.1)
-
-- 119.600 MHz
-- 119.700 MHz
-- 119.900 MHz
-- 120.350 MHz
-- 120.400 MHz
-- 121.500 MHz
-
-## Architecture
-
-```text
-SDR (RTL-SDR in PoC; pluggable backend later)
-  -> rtl_airband (multi-channel AM demod)
-  -> audio ingest
-  -> energy/VAD gate
-  -> YAMNet classifier
-  -> event scorer & suppressor
-  -> evidence recorder (IQ/audio/spectrum/metadata)
-  -> WeCom alert
-  -> SQLite + file storage
+```
+SDR 硬件（RTL-SDR）
+  └─> rtl_fm / rtl_airband（AM 解调，输出 WAV）
+        └─> 分类器（YAMNet 或启发式回退）
+              └─> 时序评分器（持续时间 + 冷却窗口）
+                    └─> 取证记录器（音频 / 频谱 PNG / 元数据 JSON）
+                          └─> WeCom 告警 + SQLite 事件库
 ```
 
-## Current Implementation Status
+**PoC 阶段**使用 `rtl_fm`（librtlsdr 自带）做单信道解调验证；  
+**生产阶段**切换至 `rtl_airband` 实现 118–137 MHz 全频段多信道并行解调。
 
-This repository now includes a runnable v0.1 scaffold:
+## 硬件需求
 
-- Config loader (`configs/default.yaml` + env override for `WECOM_WEBHOOK`)
-- Temporal music scoring with hold-time and cooldown
-- SQLite event persistence
-- Artifact recorder (`audio/iq/spectrum/meta`)
-- WeCom notifier (dry-run supported)
-- Multiple runtime sources: simulate / JSONL file / STDIN JSONL / WAV directory fallback / rtl_airband recordings
-- Event query mode: list recent events from SQLite
+| 组件 | 型号 / 规格 |
+|------|------------|
+| SDR | RTL-SDR（PoC）；Airspy Mini 或 SDRplay RSP1A（生产） |
+| 前端滤波 | 118–137 MHz 航空段带通滤波器 + 低噪放 |
+| 天线 | Diamond D-130 宽带 discone 或 118–137 MHz 专调垂直天线 |
+| 主机 | macOS / Linux x86_64（N100 小主机）；后期支持 ARM64（香橙派） |
 
-## Quick Start
+## 环境搭建
+
+### macOS（开发 / 验证）
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e . --no-build-isolation
+# 1. 系统依赖
+brew install librtlsdr sox python@3.12
 
-# Dry-run simulated pipeline (no SDR required)
+# 2. 验证 RTL-SDR 识别
+rtl_test -t
+
+# 3. 克隆项目
+git clone https://github.com/VaneEcho/airband-monitor
+cd airband-monitor
+
+# 4. Python 环境
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+pip install pyyaml numpy scipy          # 基础依赖（启发式分类器）
+pip install tensorflow tensorflow-hub   # 可选：YAMNet 后端
+```
+
+### Linux（部署目标）
+
+```bash
+apt install rtl-sdr sox python3.12 python3.12-venv
+# 克隆、venv、pip 步骤同 macOS
+```
+
+## 快速开始
+
+```bash
+source .venv/bin/activate
+
+# 1. 冒烟测试（无需 SDR 硬件）
 python -m airband_monitor.main --simulate
 
-# Replay model output frames from file
+# 2. 录制测试音频（需要 RTL-SDR 已连接）
+./scripts/capture_macos.sh 121.5 60 test_audio/live         # 录 60s 航空 AM
+./scripts/capture_macos.sh 89.0  30 test_audio/music_inject  # 录 30s FM 广播（模拟干扰注入）
+
+# 3. Watch 模式持续分类（启发式，无需 TensorFlow）
+python -m airband_monitor.main \
+    --config configs/poc_macos.yaml \
+    --input-wav-dir test_audio/live \
+    --wav-freq 121.5 \
+    --watch --poll-interval 2 \
+    --classifier-backend heuristic
+
+# 4. 切换为 YAMNet 后端（需已安装 tensorflow tensorflow-hub）
+python -m airband_monitor.main \
+    --config configs/poc_macos.yaml \
+    --input-wav-dir test_audio/live \
+    --wav-freq 121.5 \
+    --watch \
+    --classifier-backend yamnet
+
+# 5. 从 JSONL 文件回放推理帧
 python -m airband_monitor.main --input-jsonl examples/frames.jsonl
 
-# Query recent events
+# 6. 查看已记录事件
 python -m airband_monitor.main --list-events 10
 
-# Evaluate threshold candidates from labeled samples
-python -m airband_monitor.main --evaluate-jsonl examples/eval_samples.jsonl --eval-thresholds 0.5,0.6,0.7,0.8
-
-# Classify existing WAV chunks (fallback heuristic)
-python -m airband_monitor.main --input-wav-dir /path/to/wav --wav-freq 121.5
-
-# Ingest rtl_airband recording directory (freq inferred from filename if possible)
-python -m airband_monitor.main --input-rtl-dir /path/to/rtl_recordings --rtl-default-freq 121.5
-
-# Watch mode for continuous ingest (new files only)
-python -m airband_monitor.main --input-rtl-dir /path/to/rtl_recordings --watch --poll-interval 2 --watch-state-file data/watch_seen_files.txt --classifier-backend auto
+# 7. 阈值评估
+python -m airband_monitor.main \
+    --evaluate-jsonl examples/eval_samples.jsonl \
+    --eval-thresholds 0.5,0.6,0.7,0.8,0.9
 ```
 
-The pipeline persists events to `data/events.db` and artifacts to `data/artifacts/`.
+事件数据库：`data/events.db`；取证文件：`data/artifacts/`。
 
-## Runtime Input Contract (JSONL)
+## 配置文件
 
-Each line should be one JSON object:
+| 文件 | 用途 |
+|------|------|
+| `configs/default.yaml` | 生产默认配置 |
+| `configs/poc_macos.yaml` | macOS PoC 验证（低阈值、dry_run=true）|
+
+`WECOM_WEBHOOK` 环境变量会自动覆盖配置文件中的 webhook 地址。
+
+## 分类器后端
+
+| `--classifier-backend` | 依赖 | 适用场景 |
+|------------------------|------|---------|
+| `auto`（默认）| 优先 YAMNet，TF 不可用时回退启发式 | 生产推荐 |
+| `yamnet` | tensorflow, tensorflow-hub, scipy | 高准确率 |
+| `heuristic` | 无外部依赖 | 快速验证、低算力节点 |
+
+## JSONL 推送接口
+
+外部推理进程可将结果以 JSONL 格式写入 STDIN 或文件，与本系统对接：
 
 ```json
-{"ts_utc":"2026-04-27T14:30:00+00:00","freq_mhz":121.5,"music_prob":0.83,"labels":{"music":0.83},"audio_path":"/path/chunk.wav","iq_path":"/path/chunk.iq"}
+{"ts_utc":"2026-04-27T14:30:00+00:00","freq_mhz":121.5,"music_prob":0.83,"labels":{"music":0.83},"audio_path":"/path/chunk.wav","iq_path":""}
 ```
 
-This makes it easy to bridge external inference pipelines (rtl_airband + classifier sidecar) into this eventing core.
+```bash
+some_classifier | python -m airband_monitor.main --stdin-jsonl
+```
 
+## rtl_airband 录音目录模式
 
+`--input-rtl-dir` 递归扫描 WAV 录音，从文件名推断频率：
 
-## rtl_airband Recording Mode
+- 小数 MHz 格式：`121.500`
+- 整数 Hz 格式：`121500000`
 
-`--input-rtl-dir` scans WAV recordings (recursive) and tries to infer frequency from filename patterns:
+无法推断时使用 `--rtl-default-freq` 指定回退频率。
 
-- decimal MHz: `121.500`
-- Hz integer: `121500000`
+Watch 模式细节：
+- `--watch` 与 `--input-wav-dir` 或 `--input-rtl-dir` 配合使用
+- 每次轮询只处理新文件，重启后不重复处理（状态持久化至 `--watch-state-file`）
+- `--max-loops N` 用于测试场景的有界运行
 
-If frequency cannot be inferred, it uses `--rtl-default-freq` when provided.
+## 证据策略
 
-Watch mode details:
-- `--watch` works with `--input-wav-dir` or `--input-rtl-dir`
-- only newly discovered WAV files are processed per poll
-- `--max-loops N` can be used for bounded runs in testing
-- seen file persistence avoids duplicate processing across restarts (`--watch-state-file`)
-- each loop prints summary logs: total files, new files, triggered events
+- **IQ 环形缓冲**：120 秒滚动窗口
+- **事件截取**：触发前 30 秒 + 触发后 90 秒
+- **落盘内容**：`audio.wav`、`capture.iq`、`spectrum.png`、`meta.json`
+- **磁盘清理**：超过 85% 开始删最旧事件，降至 75% 停止
 
-## WAV Directory Fallback Mode
+## 检测参数（生产默认值）
 
-For early rtl_airband integration (before YAMNet sidecar wiring), you can point the pipeline to a WAV directory.
-Each `*.wav` file is heuristically scored and converted into ingestion frames automatically.
+| 参数 | 值 | 说明 |
+|------|----|------|
+| `music_prob_threshold` | 0.70 | 触发阈值 |
+| `min_duration_sec` | 5 | 持续达阈值才确认事件 |
+| `duplicate_cooldown_sec` | 120 | 同频点冷却窗口 |
 
-This mode is for bring-up only; YAMNet should replace it for production detection quality.
+设计原则：**宁可多报，不可漏报**——存储廉价，漏掉证据代价不可挽回。
 
-Classifier backend options:
-- `--classifier-backend auto` (default): use YAMNet if available, else fallback heuristic
-- `--classifier-backend yamnet`: force YAMNet (requires tensorflow/tensorflow_hub/scipy)
-- `--classifier-backend heuristic`: force lightweight fallback
+## 路线图
 
-## Detection Strategy (v0.1 defaults)
+| 版本 | 目标 |
+|------|------|
+| v0.1 | RTL-SDR + rtl_fm/rtl_airband + YAMNet + WeCom + 取证存储 ✓ |
+| v0.2 | 载波频偏检测 + 占空比分析（信号级二次判据） |
+| v0.3 | FM 广播相关性匹配（直接定位干扰源电台） |
+| v1.0 | 多节点部署 + TDoA 粗定位 + 事件联邦 |
 
-1. Light pre-gate by energy/VAD.
-2. Run YAMNet inference on active audio windows.
-3. Trigger event when `music_like_prob >= 0.70` continuously for `>= 5s`.
-4. De-duplicate alerts per frequency in a 120s cooldown window.
+详细实施计划见 [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)。
 
-Design preference: **prefer false positives over misses** in early stage.
+## 辅助脚本
 
-## Evidence Policy
+| 脚本 | 用途 |
+|------|------|
+| `scripts/capture_macos.sh` | rtl_fm 录音封装（频点 / 时长 / 输出目录） |
+| `scripts/verify_pipeline.sh` | 分阶段验证（硬件 → 依赖 → 分类器 → 管道） |
+| `scripts/run_demo.sh` | 快速演示 |
 
-- IQ ring buffer: 120s
-- Event save window: pre-trigger 30s + post-trigger 90s
-- Spectrum output: one static PNG per event
-- Metadata fields (minimum):
-  - site_id
-  - frequency
-  - trigger_time_utc
-  - trigger_time_local (UTC+8)
-  - duration_sec
-  - top_labels/probabilities
-  - artifact paths
+## 提交前检查
 
-## Storage & Retention
-
-- SQLite for metadata index.
-- Filesystem for IQ/audio/PNG/JSON artifacts.
-- Retention rule (default):
-  - Start cleanup when disk usage > 85%
-  - Stop cleanup when disk usage < 75%
-  - Delete oldest events first
-
-## Environments
-
-- Development PoC: Windows + WSL
-- Production target: Linux x86_64 (N100 mini PC preferred)
-- ARM64 (e.g., Orange Pi) supported later as secondary target
-
-## Roadmap
-
-- v0.1: RTL-SDR + rtl_airband + YAMNet + WeCom + evidence capture
-- v0.2: Add carrier-offset and duty-cycle signal heuristics
-- v0.3: Add FM correlation enhancement and improved suppression
-- v1.0: Multi-node deployment and event federation
-
-See implementation plan in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
-
-## v0.1 Merge Gate (Recommended)
-
-Before merge, run at least:
-
-1. `pytest -q`
-2. `python -m airband_monitor.main --simulate --classifier-backend heuristic`
-3. `python -m airband_monitor.main --evaluate-jsonl examples/eval_samples.jsonl --eval-thresholds 0.5,0.6,0.7,0.8,0.9`
-
-Use the evaluation report to pick an initial threshold for deployment.
+```bash
+pytest -q
+python -m airband_monitor.main --simulate --classifier-backend heuristic
+python -m airband_monitor.main --evaluate-jsonl examples/eval_samples.jsonl \
+    --eval-thresholds 0.5,0.6,0.7,0.8,0.9
+```
