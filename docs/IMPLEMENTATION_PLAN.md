@@ -151,3 +151,17 @@ alert:
 - Added persistent watch seen-file state to avoid duplicate processing after restart.
 - Added per-loop watch logging (total/new/triggered counters).
 - Added classifier backend selection (`auto`/`heuristic`/`yamnet`) with optional YAMNet runtime path.
+
+## 11) v0.1 Merge Checklist
+
+- [ ] Unit tests pass (`pytest -q`)
+- [ ] Simulated E2E run succeeds
+- [ ] Threshold grid evaluation report generated from labeled samples
+- [ ] README quick-start commands validated
+
+## 12) Remaining TODOs (to reach stable v0.1)
+
+- Replace heuristic-only default with validated YAMNet runtime in target environment
+- Implement true IQ ring-buffer capture (currently structural placeholders exist)
+- Add replay-based false-positive analysis over real captured samples
+- Add service packaging (systemd/docker) for long-running node deployment

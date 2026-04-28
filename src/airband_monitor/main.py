@@ -18,6 +18,7 @@ from .storage import EventRecord, EventStore
 from .wav_source import WavDirectorySource
 from .watch_state import WatchSeenStore
 from .classifier_backend import build_classifier
+from .evaluation import best_by_f1, evaluate_grid, load_eval_jsonl
 
 UTC = timezone.utc
 
@@ -46,6 +47,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="auto",
         choices=["auto", "heuristic", "yamnet"],
         help="Audio classifier backend for wav/rtl sources",
+    )
+    parser.add_argument("--evaluate-jsonl", help="Evaluate threshold performance from labeled JSONL")
+    parser.add_argument(
+        "--eval-thresholds",
+        default="0.5,0.6,0.7,0.8,0.9",
+        help="Comma-separated threshold candidates for --evaluate-jsonl",
     )
     return parser
 
@@ -193,11 +200,34 @@ def _process_frames(
     return processed
 
 
+def _run_eval_report(eval_jsonl: str, threshold_csv: str) -> None:
+    thresholds = [float(x.strip()) for x in threshold_csv.split(",") if x.strip()]
+    samples = load_eval_jsonl(Path(eval_jsonl))
+    metrics = evaluate_grid(samples, thresholds)
+    best = best_by_f1(metrics)
+
+    print("threshold,tp,fp,fn,tn,precision,recall,f1")
+    for m in metrics:
+        print(
+            f"{m.threshold:.2f},{m.tp},{m.fp},{m.fn},{m.tn},"
+            f"{m.precision:.4f},{m.recall:.4f},{m.f1:.4f}"
+        )
+
+    print(
+        f"recommended_threshold={best.threshold:.2f} "
+        f"(f1={best.f1:.4f}, precision={best.precision:.4f}, recall={best.recall:.4f})"
+    )
+
+
 def main() -> None:
     args = _build_parser().parse_args()
     cfg = load_config(args.config)
 
     store = EventStore(cfg.storage.sqlite_path)
+
+    if args.evaluate_jsonl:
+        _run_eval_report(args.evaluate_jsonl, args.eval_thresholds)
+        return
 
     if args.list_events:
         _print_recent_events(store, limit=max(1, args.list_events))

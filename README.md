@@ -68,6 +68,9 @@ python -m airband_monitor.main --input-jsonl examples/frames.jsonl
 # Query recent events
 python -m airband_monitor.main --list-events 10
 
+# Evaluate threshold candidates from labeled samples
+python -m airband_monitor.main --evaluate-jsonl examples/eval_samples.jsonl --eval-thresholds 0.5,0.6,0.7,0.8
+
 # Classify existing WAV chunks (fallback heuristic)
 python -m airband_monitor.main --input-wav-dir /path/to/wav --wav-freq 121.5
 
@@ -166,3 +169,13 @@ Design preference: **prefer false positives over misses** in early stage.
 - v1.0: Multi-node deployment and event federation
 
 See implementation plan in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
+
+## v0.1 Merge Gate (Recommended)
+
+Before merge, run at least:
+
+1. `pytest -q`
+2. `python -m airband_monitor.main --simulate --classifier-backend heuristic`
+3. `python -m airband_monitor.main --evaluate-jsonl examples/eval_samples.jsonl --eval-thresholds 0.5,0.6,0.7,0.8,0.9`
+
+Use the evaluation report to pick an initial threshold for deployment.
